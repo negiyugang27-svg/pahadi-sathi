@@ -13,30 +13,40 @@ DATA_PATH = BASE_DIR / "data" / "sample_locations.csv"
 
 st.set_page_config(
     page_title="PahadiSathi",
-    page_icon="mountain",
+    page_icon="🏔️",
     layout="wide",
 )
 
 
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=300)
 def get_weather(latitude, longitude):
     url = "https://api.open-meteo.com/v1/forecast"
 
     params = {
         "latitude": latitude,
         "longitude": longitude,
-        "current": "temperature_2m,relative_humidity_2m,rain,weather_code,wind_speed_10m",
-        "daily": "precipitation_sum,precipitation_probability_max",
+        "current": (
+            "temperature_2m,"
+            "relative_humidity_2m,"
+            "precipitation,"
+            "weather_code,"
+            "wind_speed_10m"
+        ),
+        "daily": (
+            "precipitation_sum,"
+            "precipitation_probability_max"
+        ),
         "forecast_days": 7,
-        "timezone": "auto",
+        "timezone": "Asia/Kolkata",
     }
 
     try:
         response = requests.get(
             url,
             params=params,
-            timeout=5,
+            timeout=20,
         )
+
         response.raise_for_status()
         return response.json()
 
@@ -57,16 +67,31 @@ def weather_name(code):
         51: "Light drizzle",
         53: "Drizzle",
         55: "Heavy drizzle",
+        56: "Freezing drizzle",
+        57: "Heavy freezing drizzle",
         61: "Light rain",
         63: "Moderate rain",
         65: "Heavy rain",
+        66: "Freezing rain",
+        67: "Heavy freezing rain",
+        71: "Light snow",
+        73: "Moderate snow",
+        75: "Heavy snow",
+        77: "Snow grains",
         80: "Rain showers",
         81: "Heavy rain showers",
         82: "Violent rain showers",
+        85: "Snow showers",
+        86: "Heavy snow showers",
         95: "Thunderstorm",
+        96: "Thunderstorm with slight hail",
+        99: "Thunderstorm with heavy hail",
     }
 
-    return names.get(int(code), "Unknown")
+    try:
+        return names.get(int(code), "Unknown")
+    except (TypeError, ValueError):
+        return "Unknown"
 
 
 def calculate_risk(
@@ -107,7 +132,7 @@ def calculate_risk(
         score += 1
         reasons.append("Moderate soil moisture")
 
-    if previous_landslide == 1:
+    if int(previous_landslide) == 1:
         score += 2
         reasons.append("Previous nearby landslide")
 
@@ -124,6 +149,7 @@ def calculate_risk(
 
 
 st.title("PahadiSathi")
+
 st.subheader(
     "Live weather and landslide-risk dashboard for Uttarakhand"
 )
@@ -134,7 +160,7 @@ st.warning(
 
 
 if not DATA_PATH.exists():
-    st.error("Missing file: data/sample_locations.csv")
+    st.error(f"Missing file: {DATA_PATH}")
     st.stop()
 
 
@@ -161,11 +187,13 @@ required_columns = [
     "risk",
 ]
 
+
 missing_columns = [
     column
     for column in required_columns
     if column not in locations.columns
 ]
+
 
 if missing_columns:
     st.error("CSV mein required columns missing hain:")
@@ -197,49 +225,72 @@ with left:
         get_weather.clear()
         st.rerun()
 
-    with st.spinner("Loading weather..."):
+    with st.spinner("Loading live weather..."):
         weather = get_weather(
             latitude,
             longitude,
         )
 
     if "error" in weather:
-        st.warning(
-            "Live weather unavailable. CSV data use ho raha hai."
-        )
+        st.error("Live weather unavailable.")
+        st.code(weather["error"])
+
         current = {}
         daily = {}
+
     else:
         st.success("Live weather loaded.")
+
         current = weather.get("current", {})
         daily = weather.get("daily", {})
 
     temperature = current.get("temperature_2m", 0)
     humidity = current.get("relative_humidity_2m", 0)
-    rain_now = current.get("rain", 0)
+
+    # Open-Meteo current rain field is precipitation.
+    rain_now = current.get("precipitation", 0)
+
     wind = current.get("wind_speed_10m", 0)
     code = current.get("weather_code", 0)
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.metric("Temperature", f"{temperature} C")
+        st.metric(
+            "Temperature",
+            f"{temperature} °C",
+        )
 
     with col2:
-        st.metric("Humidity", f"{humidity}%")
+        st.metric(
+            "Humidity",
+            f"{humidity}%",
+        )
 
     col3, col4 = st.columns(2)
 
     with col3:
-        st.metric("Rain now", f"{rain_now} mm")
+        st.metric(
+            "Rain now",
+            f"{rain_now} mm",
+        )
 
     with col4:
-        st.metric("Wind", f"{wind} km/h")
+        st.metric(
+            "Wind",
+            f"{wind} km/h",
+        )
 
-    st.write(f"Condition: **{weather_name(code)}**")
+    st.write(
+        f"Condition: **{weather_name(code)}**"
+    )
 
     dates = daily.get("time", [])
-    rain_values = daily.get("precipitation_sum", [])
+    rain_values = daily.get(
+        "precipitation_sum",
+        [],
+    )
+
     rain_probability = daily.get(
         "precipitation_probability_max",
         [],
@@ -266,10 +317,14 @@ with left:
             ["Date", "Rainfall (mm)"]
         ].copy()
 
-        chart["Date"] = pd.to_datetime(chart["Date"])
+        chart["Date"] = pd.to_datetime(
+            chart["Date"]
+        )
+
         chart = chart.set_index("Date")
 
         st.subheader("Rainfall line graph")
+
         st.line_chart(
             chart,
             y="Rainfall (mm)",
@@ -277,27 +332,38 @@ with left:
         )
 
         st.subheader("Rainfall bar graph")
+
         st.bar_chart(
             chart,
             y="Rainfall (mm)",
             height=300,
         )
 
-        rainfall_24h = float(rain_values[0])
+        rainfall_24h = float(
+            rain_values[0]
+        )
+
         rainfall_7d = sum(
             float(value)
             for value in rain_values[:7]
         )
 
     else:
-        rainfall_24h = float(selected["rainfall_24h"])
-        rainfall_7d = float(selected["rainfall_7d"])
+        rainfall_24h = float(
+            selected["rainfall_24h"]
+        )
+
+        rainfall_7d = float(
+            selected["rainfall_7d"]
+        )
 
         st.info(
-            "Forecast unavailable. CSV data use ho raha hai."
+            "Forecast unavailable. "
+            "CSV data use ho raha hai."
         )
 
     st.divider()
+
     st.subheader("Risk inputs")
 
     slope = st.slider(
@@ -335,7 +401,10 @@ with left:
         index=int(selected["previous_landslide"]),
     )
 
-    if st.button("Calculate risk", type="primary"):
+    if st.button(
+        "Calculate risk",
+        type="primary",
+    ):
         score, level, reasons = calculate_risk(
             rainfall_24h,
             rainfall_7d,
@@ -344,25 +413,37 @@ with left:
             previous_landslide,
         )
 
-        st.metric("Risk score", f"{score}/10")
+        st.metric(
+            "Risk score",
+            f"{score}/10",
+        )
 
         if level == "Critical":
             st.error("Critical risk")
+
         elif level == "High":
             st.error("High risk")
+
         elif level == "Moderate":
             st.warning("Moderate risk")
+
         else:
             st.success("Lower risk")
 
-        st.write(f"Risk level: **{level}**")
+        st.write(
+            f"Risk level: **{level}**"
+        )
 
         if reasons:
             st.write("### Contributing factors")
+
             for reason in reasons:
                 st.write(f"- {reason}")
+
         else:
-            st.write("No major risk factors detected.")
+            st.write(
+                "No major risk factors detected."
+            )
 
 
 with right:
@@ -375,7 +456,10 @@ with right:
     )
 
     folium.Marker(
-        location=[latitude, longitude],
+        location=[
+            latitude,
+            longitude,
+        ],
         tooltip=selected_location,
         popup=selected_location,
         icon=folium.Icon(
@@ -389,6 +473,7 @@ with right:
         if int(item["risk"]) == 1:
             color = "red"
             risk_text = "High"
+
         else:
             color = "green"
             risk_text = "Lower"
@@ -422,25 +507,3 @@ st.caption(
     "PahadiSathi is a prototype. "
     "Follow official warnings during emergencies."
 )
-import requests
-def get_live_weather(latitude=30.3165, longitude=78.0322):
-    url = "https://api.open-meteo.com/v1/forecast"
-
-    params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "current": (
-            "temperature_2m,"
-            "relative_humidity_2m,"
-            "precipitation,"
-            "wind_speed_10m,"
-            "weather_code"
-        ),
-        "daily": "temperature_2m_max,temperature_2m_min,weather_code",
-        "forecast_days": 5,
-        "timezone": "Asia/Kolkata"
-    }
-
-    response = requests.get(url, params=params, timeout=15)
-    response.raise_for_status()
-    return response.json()
