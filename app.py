@@ -18,8 +18,50 @@ st.set_page_config(
 )
 
 
-@st.cache_data(ttl=300)
+@@st.cache_data(ttl=1800)
 def get_weather(latitude, longitude):
+    url = "https://api.open-meteo.com/v1/forecast"
+
+    params = {
+        "latitude": float(latitude),
+        "longitude": float(longitude),
+        "current": (
+            "temperature_2m,"
+            "relative_humidity_2m,"
+            "precipitation,"
+            "weather_code,"
+            "wind_speed_10m"
+        ),
+        "daily": (
+            "precipitation_sum,"
+            "precipitation_probability_max"
+        ),
+        "forecast_days": 7,
+        "timezone": "Asia/Kolkata",
+    }
+
+    try:
+        response = requests.get(
+            url,
+            params=params,
+            timeout=20,
+        )
+
+        if response.status_code == 429:
+            return {
+                "error": (
+                    "Weather API rate limit reached. "
+                    "Please try again after a few minutes."
+                )
+            }
+
+        response.raise_for_status()
+        return response.json()
+
+    except requests.exceptions.RequestException as error:
+        return {
+            "error": f"Weather API request failed: {error}"
+        }
     url = "https://api.open-meteo.com/v1/forecast"
 
     params = {
