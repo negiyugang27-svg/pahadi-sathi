@@ -1,0 +1,6 @@
+location,district,latitude,longitude,rainfall_24h,rainfall_7d,slope,elevation,soil_moisture,road_distance,previous_landslide,risk
+Joshimath,Chamoli,30.55,79.56,40,120,35,1875,70,1.5,1,1
+Rudraprayag,Rudraprayag,30.28,78.98,20,65,18,895,45,2.0,0,0
+Uttarkashi,Uttarkashi,30.73,78.44,55,180,42,1150,82,1.0,1,1
+Pithoragarh,Pithoragarh,29.58,80.22,30,90,25,1650,60,2.5,0,1
+Dehradun,Dehradun,30.32,78.03,10,35,8,640,35,4.0,0,0

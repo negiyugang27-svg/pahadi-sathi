@@ -1,0 +1,4 @@
+road_name,district,latitude,longitude,blockage_type,status,severity,estimated_debris,alternative_route,verified,reported_at,reporter,description,photo
+Badrinath Highway,Chamoli,30.556,79.564,Landslide debris,Completely blocked,High,2.5,Route verification required,No,2026-09-12 18:00:00,Demo report,Debris covering both lanes,
+Kedarnath Road,Rudraprayag,30.285,78.981,Boulder fall,Partially blocked,Moderate,0.8,Traffic controlled locally,Yes,2026-09-12 17:30:00,Demo report,One lane is open,
+Gangotri Highway,Uttarkashi,30.726,78.435,Landslide debris,Reopened,Low,0.0,None,Yes,2026-09-12 16:00:00,Demo report,Road cleared,

@@ -1,0 +1,7 @@
+location,district,latitude,longitude,rainfall_24h,rainfall_7d,slope,elevation,soil_moisture,road_distance,previous_landslide,risk
+Joshimath,Chamoli,30.556,79.564,42,135,36,1875,68,2.4,1,1
+Gopeshwar,Chamoli,30.410,79.321,18,75,22,1550,42,5.1,0,0
+Rudraprayag,Rudraprayag,30.285,78.981,65,210,41,895,82,1.8,1,1
+Uttarkashi,Uttarkashi,30.726,78.435,25,92,28,1150,51,4.3,0,0
+Dhanaulti,Tehri Garhwal,30.439,78.239,52,180,34,2286,73,3.0,1,1
+Pauri,Pauri Garhwal,30.146,78.780,12,48,18,1650,34,7.5,0,0
