@@ -18,7 +18,7 @@ st.set_page_config(
 )
 
 
-@@st.cache_data(ttl=1800)
+@st.cache_data(ttl=1800)
 def get_weather(latitude, longitude):
     url = "https://api.open-meteo.com/v1/forecast"
 
