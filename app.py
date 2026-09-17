@@ -23,8 +23,8 @@ def get_weather(latitude, longitude):
     url = "https://api.open-meteo.com/v1/forecast"
 
     params = {
-        "latitude": latitude,
-        "longitude": longitude,
+        "latitude": float(latitude),
+        "longitude": float(longitude),
         "current": (
             "temperature_2m,"
             "relative_humidity_2m,"
@@ -52,7 +52,7 @@ def get_weather(latitude, longitude):
 
     except Exception as error:
         return {
-            "error": str(error),
+            "error": repr(error),
         }
 
 
@@ -238,6 +238,10 @@ with left:
         current = {}
         daily = {}
 
+        st.info(
+            "The exact API error is shown above."
+        )
+
     else:
         st.success("Live weather loaded.")
 
@@ -247,7 +251,7 @@ with left:
     temperature = current.get("temperature_2m", 0)
     humidity = current.get("relative_humidity_2m", 0)
 
-    # Open-Meteo current rain field is precipitation.
+    # Correct Open-Meteo current rain field
     rain_now = current.get("precipitation", 0)
 
     wind = current.get("wind_speed_10m", 0)
@@ -473,7 +477,6 @@ with right:
         if int(item["risk"]) == 1:
             color = "red"
             risk_text = "High"
-
         else:
             color = "green"
             risk_text = "Lower"
