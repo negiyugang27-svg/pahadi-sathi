@@ -820,12 +820,17 @@ with tab3:
         st.info("Abhi koi road blockage report nahi hai.")
     else:
         st.dataframe(
-            blockages_df.sort_values(
-                "created_at",
-                ascending=False,
-            ),
+          with tab3:
+    st.subheader("Road Blockages")
+
+    if blockages_df.empty:
+        st.info("Abhi koi road blockage report nahi hai.")
+    else:
+        st.dataframe(
+            blockages_df,
             use_container_width=True,
             hide_index=True,
+        ),
         )
 
 
