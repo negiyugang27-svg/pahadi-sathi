@@ -11,7 +11,7 @@ from streamlit_folium import st_folium
 
 
 # =========================================================
-# PAGE SETTINGS
+# PAGE CONFIG
 # =========================================================
 
 st.set_page_config(
@@ -86,7 +86,7 @@ DEFAULT_LOCATION_DF = pd.DataFrame(
 
 
 # =========================================================
-# CSV HELPERS
+# DATA FUNCTIONS
 # =========================================================
 
 def normalize_columns(df):
@@ -107,6 +107,16 @@ def safe_number(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def ensure_columns(df, columns):
+    df = df.copy()
+
+    for column in columns:
+        if column not in df.columns:
+            df[column] = ""
+
+    return df[columns]
 
 
 def normalize_locations(df):
@@ -171,39 +181,7 @@ def normalize_locations(df):
     return df[LOCATION_COLUMNS].copy()
 
 
-def merge_locations(csv_df):
-    csv_df = normalize_locations(csv_df)
-    defaults = normalize_locations(
-        DEFAULT_LOCATION_DF
-    )
-
-    combined = pd.concat(
-        [csv_df, defaults],
-        ignore_index=True,
-    )
-
-    combined["_city_key"] = (
-        combined["place_name"]
-        .astype(str)
-        .str.strip()
-        .str.casefold()
-    )
-
-    combined = combined.drop_duplicates(
-        subset="_city_key",
-        keep="first",
-    )
-
-    combined = combined.drop(
-        columns="_city_key",
-        errors="ignore",
-    )
-
-    return combined.reset_index(drop=True)
-
-
-@st.cache_data
-def load_locations(file_time):
+def load_locations():
     if LOCATIONS_FILE.exists():
         try:
             csv_df = pd.read_csv(
@@ -218,27 +196,46 @@ def load_locations(file_time):
             columns=LOCATION_COLUMNS
         )
 
-    final_df = merge_locations(csv_df)
+    csv_df = normalize_locations(csv_df)
+    default_df = normalize_locations(
+        DEFAULT_LOCATION_DF
+    )
+
+    combined_df = pd.concat(
+        [csv_df, default_df],
+        ignore_index=True,
+    )
+
+    combined_df["_city_key"] = (
+        combined_df["place_name"]
+        .astype(str)
+        .str.strip()
+        .str.casefold()
+    )
+
+    combined_df = combined_df.drop_duplicates(
+        subset="_city_key",
+        keep="first",
+    )
+
+    combined_df = combined_df.drop(
+        columns="_city_key",
+        errors="ignore",
+    )
+
+    combined_df = combined_df.reset_index(
+        drop=True
+    )
 
     try:
-        final_df.to_csv(
+        combined_df.to_csv(
             LOCATIONS_FILE,
             index=False,
         )
     except Exception:
         pass
 
-    return final_df
-
-
-def ensure_columns(df, columns):
-    df = df.copy()
-
-    for column in columns:
-        if column not in df.columns:
-            df[column] = ""
-
-    return df[columns]
+    return combined_df
 
 
 def load_csv(file_path, columns):
@@ -271,6 +268,7 @@ def save_csv(df, file_path, columns):
         df,
         columns,
     )
+
     df.to_csv(
         file_path,
         index=False,
@@ -278,7 +276,7 @@ def save_csv(df, file_path, columns):
 
 
 # =========================================================
-# RISK CALCULATION
+# RISK CALCULATOR
 # =========================================================
 
 def calculate_risk(
@@ -391,28 +389,21 @@ def get_weather(latitude, longitude):
             timeout=10,
         )
         response.raise_for_status()
+
         return response.json().get(
             "current",
             {},
         )
+
     except Exception:
         return {}
 
 
 # =========================================================
-# LOAD DATA
+# LOAD DATA FILES
 # =========================================================
 
-if LOCATIONS_FILE.exists():
-    locations_file_time = (
-        LOCATIONS_FILE.stat().st_mtime_ns
-    )
-else:
-    locations_file_time = 0
-
-locations_df = load_locations(
-    locations_file_time
-)
+locations_df = load_locations()
 
 REPORT_COLUMNS = [
     "report_id",
@@ -561,7 +552,7 @@ selected_score, selected_level, _ = (
 
 
 # =========================================================
-# CITY DETAILS
+# SELECTED CITY DETAILS
 # =========================================================
 
 st.subheader(
@@ -633,7 +624,7 @@ else:
 
 
 # =========================================================
-# MAP WITH STREET AND SATELLITE LAYERS
+# MAP: STREET + SATELLITE
 # =========================================================
 
 st.subheader(
@@ -650,7 +641,6 @@ risk_map = folium.Map(
     tiles=None,
 )
 
-# Street map
 folium.TileLayer(
     tiles="OpenStreetMap",
     name="Street Map",
@@ -659,7 +649,6 @@ folium.TileLayer(
     show=True,
 ).add_to(risk_map)
 
-# Satellite map
 folium.TileLayer(
     tiles=(
         "https://server.arcgisonline.com/"
@@ -867,7 +856,7 @@ with st.form(
 
 
 # =========================================================
-# ROAD BLOCKAGE REPORT
+# ROAD BLOCKAGE
 # =========================================================
 
 st.subheader(
@@ -952,12 +941,95 @@ with st.form(
 
 
 # =========================================================
-# DASHBOARD
+# DASHBOARD AND GRAPHS
 # =========================================================
 
 st.subheader(
     "📊 Dashboard"
 )
+
+dashboard_df = locations_df.copy()
+
+dashboard_df["risk_score"] = (
+    dashboard_df.apply(
+        lambda row: calculate_risk(row)[0],
+        axis=1,
+    )
+)
+
+dashboard_df["risk_level"] = (
+    dashboard_df.apply(
+        lambda row: calculate_risk(row)[1],
+        axis=1,
+    )
+)
+
+st.subheader(
+    "📈 City-wise Landslide Risk"
+)
+
+risk_chart_df = dashboard_df[
+    [
+        "place_name",
+        "risk_score",
+    ]
+].copy()
+
+risk_chart_df = risk_chart_df.set_index(
+    "place_name"
+)
+
+st.bar_chart(
+    risk_chart_df,
+    height=420,
+)
+
+
+# Risk counts
+high_count = int(
+    (
+        dashboard_df["risk_level"]
+        == "High"
+    ).sum()
+)
+
+medium_count = int(
+    (
+        dashboard_df["risk_level"]
+        == "Medium"
+    ).sum()
+)
+
+low_count = int(
+    (
+        dashboard_df["risk_level"]
+        == "Low"
+    ).sum()
+)
+
+summary_col1, summary_col2, summary_col3 = (
+    st.columns(3)
+)
+
+summary_col1.metric(
+    "High Risk Cities",
+    high_count,
+)
+
+summary_col2.metric(
+    "Medium Risk Cities",
+    medium_count,
+)
+
+summary_col3.metric(
+    "Low Risk Cities",
+    low_count,
+)
+
+
+# =========================================================
+# DASHBOARD TABS
+# =========================================================
 
 tab1, tab2, tab3 = st.tabs(
     [
@@ -968,27 +1040,8 @@ tab1, tab2, tab3 = st.tabs(
 )
 
 
-# -----------------------------
-# ALL CITIES
-# -----------------------------
-
+# All cities tab
 with tab1:
-    dashboard_df = locations_df.copy()
-
-    dashboard_df["risk_score"] = (
-        dashboard_df.apply(
-            lambda row: calculate_risk(row)[0],
-            axis=1,
-        )
-    )
-
-    dashboard_df["risk_level"] = (
-        dashboard_df.apply(
-            lambda row: calculate_risk(row)[1],
-            axis=1,
-        )
-    )
-
     st.dataframe(
         dashboard_df[
             [
@@ -1005,10 +1058,7 @@ with tab1:
     )
 
 
-# -----------------------------
-# INCIDENT REPORTS
-# -----------------------------
-
+# Reports tab
 with tab2:
     if reports_df.empty:
         st.info(
@@ -1041,16 +1091,15 @@ with tab2:
         )
 
         st.dataframe(
-            reports_display[REPORT_COLUMNS],
+            reports_display[
+                REPORT_COLUMNS
+            ],
             use_container_width=True,
             hide_index=True,
         )
 
 
-# -----------------------------
-# ROAD BLOCKAGES
-# -----------------------------
-
+# Blockages tab
 with tab3:
     if blockages_df.empty:
         st.info(
@@ -1083,7 +1132,9 @@ with tab3:
         )
 
         st.dataframe(
-            blockages_display[BLOCKAGE_COLUMNS],
+            blockages_display[
+                BLOCKAGE_COLUMNS
+            ],
             use_container_width=True,
             hide_index=True,
         )
