@@ -11,7 +11,7 @@ from streamlit_folium import st_folium
 
 
 # =========================================================
-# PAGE CONFIG
+# PAGE CONFIGURATION
 # =========================================================
 
 st.set_page_config(
@@ -86,17 +86,19 @@ DEFAULT_LOCATION_DF = pd.DataFrame(
 
 
 # =========================================================
-# DATA FUNCTIONS
+# GENERAL DATA FUNCTIONS
 # =========================================================
 
 def normalize_columns(df):
     df = df.copy()
+
     df.columns = (
         df.columns.astype(str)
         .str.strip()
         .str.lower()
         .str.replace(" ", "_", regex=False)
     )
+
     return df
 
 
@@ -118,6 +120,15 @@ def ensure_columns(df, columns):
 
     return df[columns]
 
+
+def save_csv(df, file_path, columns):
+    df = ensure_columns(df, columns)
+    df.to_csv(file_path, index=False)
+
+
+# =========================================================
+# LOCATION FUNCTIONS
+# =========================================================
 
 def normalize_locations(df):
     df = normalize_columns(df)
@@ -184,9 +195,7 @@ def normalize_locations(df):
 def load_locations():
     if LOCATIONS_FILE.exists():
         try:
-            csv_df = pd.read_csv(
-                LOCATIONS_FILE
-            )
+            csv_df = pd.read_csv(LOCATIONS_FILE)
         except Exception:
             csv_df = pd.DataFrame(
                 columns=LOCATION_COLUMNS
@@ -238,15 +247,21 @@ def load_locations():
     return combined_df
 
 
+# =========================================================
+# CSV LOADING
+# =========================================================
+
 def load_csv(file_path, columns):
     if not file_path.exists():
         empty_df = pd.DataFrame(
             columns=columns
         )
+
         empty_df.to_csv(
             file_path,
             index=False,
         )
+
         return empty_df
 
     try:
@@ -260,18 +275,6 @@ def load_csv(file_path, columns):
     return ensure_columns(
         df,
         columns,
-    )
-
-
-def save_csv(df, file_path, columns):
-    df = ensure_columns(
-        df,
-        columns,
-    )
-
-    df.to_csv(
-        file_path,
-        index=False,
     )
 
 
@@ -367,11 +370,11 @@ def calculate_risk(
 
 
 # =========================================================
-# WEATHER
+# WEATHER FUNCTIONS
 # =========================================================
 
 @st.cache_data(ttl=900)
-def get_weather(latitude, longitude):
+def get_current_weather(latitude, longitude):
     url = (
         "https://api.open-meteo.com/v1/forecast"
         f"?latitude={latitude}"
@@ -381,6 +384,7 @@ def get_weather(latitude, longitude):
         "precipitation,"
         "rain,"
         "wind_speed_10m"
+        "&timezone=auto"
     )
 
     try:
@@ -388,6 +392,7 @@ def get_weather(latitude, longitude):
             url,
             timeout=10,
         )
+
         response.raise_for_status()
 
         return response.json().get(
@@ -399,8 +404,74 @@ def get_weather(latitude, longitude):
         return {}
 
 
+@st.cache_data(ttl=900)
+def get_7_day_forecast(latitude, longitude):
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={latitude}"
+        f"&longitude={longitude}"
+        "&daily=weather_code,"
+        "temperature_2m_max,"
+        "temperature_2m_min,"
+        "precipitation_sum,"
+        "rain_sum,"
+        "precipitation_probability_max,"
+        "wind_speed_10m_max"
+        "&forecast_days=7"
+        "&timezone=auto"
+    )
+
+    try:
+        response = requests.get(
+            url,
+            timeout=10,
+        )
+
+        response.raise_for_status()
+
+        return response.json().get(
+            "daily",
+            {},
+        )
+
+    except Exception:
+        return {}
+
+
+def weather_description(code):
+    code = int(
+        safe_number(code, -1)
+    )
+
+    if code == 0:
+        return "Clear sky"
+
+    if code in [1, 2, 3]:
+        return "Partly cloudy"
+
+    if code in [45, 48]:
+        return "Fog"
+
+    if code in [51, 53, 55, 56, 57]:
+        return "Drizzle"
+
+    if code in [61, 63, 65, 66, 67]:
+        return "Rain"
+
+    if code in [71, 73, 75, 77]:
+        return "Snow"
+
+    if code in [80, 81, 82]:
+        return "Rain showers"
+
+    if code in [95, 96, 99]:
+        return "Thunderstorm"
+
+    return "Unknown"
+
+
 # =========================================================
-# LOAD DATA FILES
+# LOAD ALL DATA
 # =========================================================
 
 locations_df = load_locations()
@@ -450,7 +521,7 @@ save_csv(
 
 
 # =========================================================
-# HEADER
+# PAGE HEADER
 # =========================================================
 
 st.title("🏔️ PahadiSathi")
@@ -526,17 +597,25 @@ selected_lon = safe_number(
     selected_row["longitude"]
 )
 
-weather = get_weather(
+
+# =========================================================
+# CURRENT WEATHER AND RISK
+# =========================================================
+
+current_weather = get_current_weather(
     selected_lat,
     selected_lon,
 )
 
 current_rain = safe_number(
-    weather.get("rain", 0)
+    current_weather.get(
+        "rain",
+        0,
+    )
 )
 
 current_humidity = safe_number(
-    weather.get(
+    current_weather.get(
         "relative_humidity_2m",
         50,
     )
@@ -552,7 +631,7 @@ selected_score, selected_level, _ = (
 
 
 # =========================================================
-# SELECTED CITY DETAILS
+# CITY INFORMATION
 # =========================================================
 
 st.subheader(
@@ -586,7 +665,7 @@ city_col4.metric(
 
 
 # =========================================================
-# WEATHER DISPLAY
+# CURRENT WEATHER DISPLAY
 # =========================================================
 
 st.subheader(
@@ -597,34 +676,152 @@ weather_col1, weather_col2, weather_col3, weather_col4 = (
     st.columns(4)
 )
 
-if weather:
+if current_weather:
     weather_col1.metric(
         "Temperature",
-        f"{weather.get('temperature_2m', 'N/A')} °C",
+        f"{current_weather.get('temperature_2m', 'N/A')} °C",
     )
 
     weather_col2.metric(
         "Humidity",
-        f"{weather.get('relative_humidity_2m', 'N/A')}%",
+        f"{current_weather.get('relative_humidity_2m', 'N/A')}%",
     )
 
     weather_col3.metric(
         "Rain",
-        f"{weather.get('rain', 'N/A')} mm",
+        f"{current_weather.get('rain', 'N/A')} mm",
     )
 
     weather_col4.metric(
         "Wind",
-        f"{weather.get('wind_speed_10m', 'N/A')} km/h",
+        f"{current_weather.get('wind_speed_10m', 'N/A')} km/h",
     )
 else:
     st.warning(
-        "Weather service temporarily unavailable."
+        "Current weather temporarily unavailable."
     )
 
 
 # =========================================================
-# MAP: STREET + SATELLITE
+# 7-DAY FORECAST
+# =========================================================
+
+st.subheader(
+    "📅 7-Day Weather Forecast"
+)
+
+forecast_data = get_7_day_forecast(
+    selected_lat,
+    selected_lon,
+)
+
+if forecast_data and forecast_data.get("time"):
+    forecast_df = pd.DataFrame(
+        {
+            "Date": forecast_data.get(
+                "time",
+                [],
+            ),
+            "Max Temp (°C)": forecast_data.get(
+                "temperature_2m_max",
+                [],
+            ),
+            "Min Temp (°C)": forecast_data.get(
+                "temperature_2m_min",
+                [],
+            ),
+            "Rain (mm)": forecast_data.get(
+                "rain_sum",
+                [],
+            ),
+            "Precipitation (mm)": forecast_data.get(
+                "precipitation_sum",
+                [],
+            ),
+            "Rain Probability (%)": forecast_data.get(
+                "precipitation_probability_max",
+                [],
+            ),
+            "Wind (km/h)": forecast_data.get(
+                "wind_speed_10m_max",
+                [],
+            ),
+            "Weather Code": forecast_data.get(
+                "weather_code",
+                [],
+            ),
+        }
+    )
+
+    forecast_df["Condition"] = forecast_df[
+        "Weather Code"
+    ].apply(weather_description)
+
+    forecast_df["Date"] = pd.to_datetime(
+        forecast_df["Date"],
+        errors="coerce",
+    ).dt.strftime("%d %b")
+
+    forecast_table = forecast_df[
+        [
+            "Date",
+            "Condition",
+            "Max Temp (°C)",
+            "Min Temp (°C)",
+            "Rain (mm)",
+            "Precipitation (mm)",
+            "Rain Probability (%)",
+            "Wind (km/h)",
+        ]
+    ]
+
+    st.dataframe(
+        forecast_table,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.subheader(
+        "🌡️ 7-Day Temperature Forecast"
+    )
+
+    temperature_chart = forecast_table[
+        [
+            "Date",
+            "Max Temp (°C)",
+            "Min Temp (°C)",
+        ]
+    ].set_index("Date")
+
+    st.line_chart(
+        temperature_chart,
+        height=350,
+    )
+
+    st.subheader(
+        "🌧️ 7-Day Rainfall Forecast"
+    )
+
+    rainfall_chart = forecast_table[
+        [
+            "Date",
+            "Precipitation (mm)",
+        ]
+    ].set_index("Date")
+
+    st.bar_chart(
+        rainfall_chart,
+        height=300,
+    )
+
+else:
+    st.warning(
+        "7-day forecast temporarily unavailable."
+    )
+
+
+# =========================================================
+# MAP
 # =========================================================
 
 st.subheader(
@@ -941,7 +1138,7 @@ with st.form(
 
 
 # =========================================================
-# DASHBOARD AND GRAPHS
+# DASHBOARD AND GRAPH
 # =========================================================
 
 st.subheader(
@@ -984,8 +1181,6 @@ st.bar_chart(
     height=420,
 )
 
-
-# Risk counts
 high_count = int(
     (
         dashboard_df["risk_level"]
@@ -1040,7 +1235,6 @@ tab1, tab2, tab3 = st.tabs(
 )
 
 
-# All cities tab
 with tab1:
     st.dataframe(
         dashboard_df[
@@ -1058,7 +1252,6 @@ with tab1:
     )
 
 
-# Reports tab
 with tab2:
     if reports_df.empty:
         st.info(
@@ -1099,7 +1292,6 @@ with tab2:
         )
 
 
-# Blockages tab
 with tab3:
     if blockages_df.empty:
         st.info(
