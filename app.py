@@ -776,6 +776,49 @@ with tab3:
     if blockages_df.empty:
         st.info("Abhi koi road blockage report nahi hai.")
     else:
+        blockages_display = blockages_df.copy()
+
+        # Missing columns ke against protection
+        required_blockage_columns = [
+            "blockage_id",
+            "created_at",
+            "location",
+            "road_name",
+            "description",
+            "severity",
+            "status",
+        ]
+
+        for column in required_blockage_columns:
+            if column not in blockages_display.columns:
+                blockages_display[column] = ""
+
+        # created_at ko safe format mein convert karke sort karega
+        blockages_display["created_at_sort"] = pd.to_datetime(
+            blockages_display["created_at"],
+            errors="coerce",
+        )
+
+        blockages_display = blockages_display.sort_values(
+            by="created_at_sort",
+            ascending=False,
+            na_position="last",
+        )
+
+        blockages_display = blockages_display.drop(
+            columns=["created_at_sort"]
+        )
+
+        st.dataframe(
+            blockages_display[
+                required_blockage_columns
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    if blockages_df.empty:
+        st.info("Abhi koi road blockage report nahi hai.")
+    else:
         st.dataframe(
             blockages_df.sort_values(
                 "created_at",
