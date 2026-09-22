@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import folium
 import pandas as pd
@@ -44,57 +44,61 @@ def get_weather(latitude, longitude):
         response = requests.get(
             url,
             params=params,
-            timeout=20,
+            timeout=(5, 10),
         )
 
+        response.raise_for_status()
+
+        data = response.json()
+
+        if "current" not in data:
+            return {
+                "error": "Weather API returned incomplete data."
+            }
+
+        return data
+
+    except requests.exceptions.Timeout:
+        return {
+            "error": (
+                "Weather API timed out. "
+                "Try again after some time."
+            )
+        }
+
+    except requests.exceptions.ConnectionError:
+        return {
+            "error": (
+                "Could not connect to weather API. "
+                "Check your internet connection."
+            )
+        }
+
+    except requests.exceptions.HTTPError as error:
         if response.status_code == 429:
             return {
                 "error": (
                     "Weather API rate limit reached. "
-                    "Please try again after a few minutes."
+                    "Try again later."
                 )
             }
 
-        response.raise_for_status()
-        return response.json()
+        return {
+            "error": f"Weather API HTTP error: {error}"
+        }
 
     except requests.exceptions.RequestException as error:
         return {
-            "error": f"Weather API request failed: {error}"
+            "error": (
+                f"Weather API request failed: {error}"
+            )
         }
-    url = "https://api.open-meteo.com/v1/forecast"
 
-    params = {
-        "latitude": float(latitude),
-        "longitude": float(longitude),
-        "current": (
-            "temperature_2m,"
-            "relative_humidity_2m,"
-            "precipitation,"
-            "weather_code,"
-            "wind_speed_10m"
-        ),
-        "daily": (
-            "precipitation_sum,"
-            "precipitation_probability_max"
-        ),
-        "forecast_days": 7,
-        "timezone": "Asia/Kolkata",
-    }
-
-    try:
-        response = requests.get(
-            url,
-            params=params,
-            timeout=20,
-        )
-
-        response.raise_for_status()
-        return response.json()
-
-    except Exception as error:
+    except ValueError:
         return {
-            "error": repr(error),
+            "error": (
+                "Weather API returned invalid JSON."
+            )
         }
 
 
@@ -131,7 +135,11 @@ def weather_name(code):
     }
 
     try:
-        return names.get(int(code), "Unknown")
+        return names.get(
+            int(code),
+            "Unknown",
+        )
+
     except (TypeError, ValueError):
         return "Unknown"
 
@@ -148,49 +156,74 @@ def calculate_risk(
 
     if rainfall_24h >= 50:
         score += 2
-        reasons.append("High rainfall in the next 24 hours")
+        reasons.append(
+            "High rainfall in the next 24 hours"
+        )
+
     elif rainfall_24h >= 25:
         score += 1
-        reasons.append("Moderate rainfall in the next 24 hours")
+        reasons.append(
+            "Moderate rainfall in the next 24 hours"
+        )
 
     if rainfall_7d >= 150:
         score += 2
-        reasons.append("High rainfall over seven days")
+        reasons.append(
+            "High rainfall over seven days"
+        )
+
     elif rainfall_7d >= 75:
         score += 1
-        reasons.append("Moderate rainfall over seven days")
+        reasons.append(
+            "Moderate rainfall over seven days"
+        )
 
     if slope >= 35:
         score += 2
-        reasons.append("Steep slope")
+        reasons.append(
+            "Steep slope"
+        )
+
     elif slope >= 20:
         score += 1
-        reasons.append("Moderate slope")
+        reasons.append(
+            "Moderate slope"
+        )
 
     if soil_moisture >= 75:
         score += 2
-        reasons.append("High soil moisture")
+        reasons.append(
+            "High soil moisture"
+        )
+
     elif soil_moisture >= 50:
         score += 1
-        reasons.append("Moderate soil moisture")
+        reasons.append(
+            "Moderate soil moisture"
+        )
 
     if int(previous_landslide) == 1:
         score += 2
-        reasons.append("Previous nearby landslide")
+        reasons.append(
+            "Previous nearby landslide"
+        )
 
     if score >= 8:
         level = "Critical"
+
     elif score >= 5:
         level = "High"
+
     elif score >= 3:
         level = "Moderate"
+
     else:
         level = "Lower"
 
     return score, level, reasons
 
 
-st.title("PahadiSathi")
+st.title("🏔️ PahadiSathi")
 
 st.subheader(
     "Live weather and landslide-risk dashboard for Uttarakhand"
@@ -202,7 +235,9 @@ st.warning(
 
 
 if not DATA_PATH.exists():
-    st.error(f"Missing file: {DATA_PATH}")
+    st.error(
+        f"Missing file: {DATA_PATH}"
+    )
     st.stop()
 
 
@@ -210,7 +245,9 @@ try:
     locations = pd.read_csv(DATA_PATH)
 
 except Exception as error:
-    st.error(f"CSV read error: {error}")
+    st.error(
+        f"CSV read error: {error}"
+    )
     st.stop()
 
 
@@ -238,16 +275,20 @@ missing_columns = [
 
 
 if missing_columns:
-    st.error("CSV mein required columns missing hain:")
+    st.error(
+        "CSV mein required columns missing hain:"
+    )
     st.write(missing_columns)
     st.stop()
 
 
-left, right = st.columns([1, 2])
+left, right = st.columns(
+    [1, 2]
+)
 
 
 with left:
-    st.header("Risk assessment")
+    st.header("📍 Risk assessment")
 
     selected_location = st.selectbox(
         "Select location",
@@ -258,12 +299,17 @@ with left:
         locations["location"] == selected_location
     ].iloc[0]
 
-    latitude = float(selected["latitude"])
-    longitude = float(selected["longitude"])
+    latitude = float(
+        selected["latitude"]
+    )
 
-    st.subheader("Live weather")
+    longitude = float(
+        selected["longitude"]
+    )
 
-    if st.button("Refresh weather"):
+    st.subheader("🌦️ Live weather")
+
+    if st.button("🔄 Refresh weather"):
         get_weather.clear()
         st.rerun()
 
@@ -274,54 +320,81 @@ with left:
         )
 
     if "error" in weather:
-        st.error("Live weather unavailable.")
-        st.code(weather["error"])
+        st.warning(
+            "Live weather unavailable. "
+            "CSV values use kiye ja rahe hain."
+        )
+
+        st.code(
+            weather["error"]
+        )
 
         current = {}
         daily = {}
 
-        st.info(
-            "The exact API error is shown above."
+    else:
+        st.success(
+            "Live weather loaded."
         )
 
-    else:
-        st.success("Live weather loaded.")
+        current = weather.get(
+            "current",
+            {}
+        )
 
-        current = weather.get("current", {})
-        daily = weather.get("daily", {})
+        daily = weather.get(
+            "daily",
+            {}
+        )
 
-    temperature = current.get("temperature_2m", 0)
-    humidity = current.get("relative_humidity_2m", 0)
+    temperature = current.get(
+        "temperature_2m",
+        0,
+    )
 
-    # Correct Open-Meteo current rain field
-    rain_now = current.get("precipitation", 0)
+    humidity = current.get(
+        "relative_humidity_2m",
+        0,
+    )
 
-    wind = current.get("wind_speed_10m", 0)
-    code = current.get("weather_code", 0)
+    rain_now = current.get(
+        "precipitation",
+        0,
+    )
 
-    col1, col2 = st.columns(2)
+    wind = current.get(
+        "wind_speed_10m",
+        0,
+    )
 
-    with col1:
+    code = current.get(
+        "weather_code",
+        0,
+    )
+
+    weather_col_1, weather_col_2 = st.columns(2)
+
+    with weather_col_1:
         st.metric(
             "Temperature",
             f"{temperature} °C",
         )
 
-    with col2:
+    with weather_col_2:
         st.metric(
             "Humidity",
             f"{humidity}%",
         )
 
-    col3, col4 = st.columns(2)
+    weather_col_3, weather_col_4 = st.columns(2)
 
-    with col3:
+    with weather_col_3:
         st.metric(
             "Rain now",
             f"{rain_now} mm",
         )
 
-    with col4:
+    with weather_col_4:
         st.metric(
             "Wind",
             f"{wind} km/h",
@@ -331,15 +404,19 @@ with left:
         f"Condition: **{weather_name(code)}**"
     )
 
-    dates = daily.get("time", [])
+    dates = daily.get(
+        "time",
+        []
+    )
+
     rain_values = daily.get(
         "precipitation_sum",
-        [],
+        []
     )
 
     rain_probability = daily.get(
         "precipitation_probability_max",
-        [],
+        []
     )
 
     forecast = pd.DataFrame(
@@ -351,7 +428,9 @@ with left:
     )
 
     if not forecast.empty:
-        st.subheader("Seven-day forecast")
+        st.subheader(
+            "📈 Seven-day forecast"
+        )
 
         st.dataframe(
             forecast,
@@ -360,16 +439,23 @@ with left:
         )
 
         chart = forecast[
-            ["Date", "Rainfall (mm)"]
+            [
+                "Date",
+                "Rainfall (mm)",
+            ]
         ].copy()
 
         chart["Date"] = pd.to_datetime(
             chart["Date"]
         )
 
-        chart = chart.set_index("Date")
+        chart = chart.set_index(
+            "Date"
+        )
 
-        st.subheader("Rainfall line graph")
+        st.subheader(
+            "📊 Rainfall line graph"
+        )
 
         st.line_chart(
             chart,
@@ -377,7 +463,9 @@ with left:
             height=300,
         )
 
-        st.subheader("Rainfall bar graph")
+        st.subheader(
+            "📊 Rainfall bar graph"
+        )
 
         st.bar_chart(
             chart,
@@ -410,32 +498,46 @@ with left:
 
     st.divider()
 
-    st.subheader("Risk inputs")
+    st.subheader(
+        "⚙️ Risk inputs"
+    )
 
     slope = st.slider(
         "Slope (degrees)",
-        0.0,
-        70.0,
-        float(selected["slope"]),
+        min_value=0.0,
+        max_value=70.0,
+        value=float(
+            selected["slope"]
+        ),
+        step=1.0,
     )
 
     elevation = st.number_input(
         "Elevation (metres)",
         min_value=0.0,
-        value=float(selected["elevation"]),
+        value=float(
+            selected["elevation"]
+        ),
+        step=10.0,
     )
 
     soil_moisture = st.slider(
         "Soil moisture (%)",
-        0.0,
-        100.0,
-        float(selected["soil_moisture"]),
+        min_value=0.0,
+        max_value=100.0,
+        value=float(
+            selected["soil_moisture"]
+        ),
+        step=1.0,
     )
 
     road_distance = st.number_input(
         "Distance from road (km)",
         min_value=0.0,
-        value=float(selected["road_distance"]),
+        value=float(
+            selected["road_distance"]
+        ),
+        step=0.1,
     )
 
     previous_landslide = st.selectbox(
@@ -444,11 +546,13 @@ with left:
         format_func=lambda value: (
             "Yes" if value == 1 else "No"
         ),
-        index=int(selected["previous_landslide"]),
+        index=int(
+            selected["previous_landslide"]
+        ),
     )
 
     if st.button(
-        "Calculate risk",
+        "🚨 Calculate risk",
         type="primary",
     ):
         score, level, reasons = calculate_risk(
@@ -465,26 +569,38 @@ with left:
         )
 
         if level == "Critical":
-            st.error("Critical risk")
+            st.error(
+                "🔴 Critical risk"
+            )
 
         elif level == "High":
-            st.error("High risk")
+            st.error(
+                "🟠 High risk"
+            )
 
         elif level == "Moderate":
-            st.warning("Moderate risk")
+            st.warning(
+                "🟡 Moderate risk"
+            )
 
         else:
-            st.success("Lower risk")
+            st.success(
+                "🟢 Lower risk"
+            )
 
         st.write(
             f"Risk level: **{level}**"
         )
 
         if reasons:
-            st.write("### Contributing factors")
+            st.write(
+                "### Contributing factors"
+            )
 
             for reason in reasons:
-                st.write(f"- {reason}")
+                st.write(
+                    f"- {reason}"
+                )
 
         else:
             st.write(
@@ -493,13 +609,49 @@ with left:
 
 
 with right:
-    st.header("Uttarakhand risk map")
+    st.header(
+        "🛰️ Uttarakhand satellite risk map"
+    )
 
     map_view = folium.Map(
-        location=[30.35, 79.10],
+        location=[
+            30.35,
+            79.10,
+        ],
         zoom_start=8,
-        tiles="OpenStreetMap",
+        tiles=None,
+        control_scale=True,
     )
+
+    folium.TileLayer(
+        tiles=(
+            "https://services.arcgisonline.com/"
+            "ArcGIS/rest/services/World_Imagery/"
+            "MapServer/tile/{z}/{y}/{x}"
+        ),
+        attr=(
+            "Tiles © Esri — Source: Esri, "
+            "Maxar, Earthstar Geographics, "
+            "and the GIS User Community"
+        ),
+        name="🛰️ Satellite",
+        overlay=False,
+        control=True,
+        max_zoom=19,
+    ).add_to(map_view)
+
+    folium.TileLayer(
+        tiles="OpenStreetMap",
+        attr="© OpenStreetMap contributors",
+        name="🗺️ Street Map",
+        overlay=False,
+        control=True,
+    ).add_to(map_view)
+
+    folium.LayerControl(
+        position="topright",
+        collapsed=False,
+    ).add_to(map_view)
 
     folium.Marker(
         location=[
@@ -507,7 +659,10 @@ with right:
             longitude,
         ],
         tooltip=selected_location,
-        popup=selected_location,
+        popup=(
+            f"<b>{selected_location}</b><br>"
+            "Selected location"
+        ),
         icon=folium.Icon(
             color="blue",
             icon="cloud",
@@ -517,10 +672,11 @@ with right:
 
     for _, item in locations.iterrows():
         if int(item["risk"]) == 1:
-            color = "red"
+            marker_color = "red"
             risk_text = "High"
+
         else:
-            color = "green"
+            marker_color = "green"
             risk_text = "Lower"
 
         folium.CircleMarker(
@@ -529,12 +685,12 @@ with right:
                 float(item["longitude"]),
             ],
             radius=9,
-            color=color,
+            color=marker_color,
             fill=True,
-            fill_color=color,
-            fill_opacity=0.75,
+            fill_color=marker_color,
+            fill_opacity=0.85,
             popup=(
-                f"{item['location']}<br>"
+                f"<b>{item['location']}</b><br>"
                 f"District: {item['district']}<br>"
                 f"Risk: {risk_text}"
             ),
@@ -544,11 +700,15 @@ with right:
         map_view,
         width=900,
         height=600,
-        key="risk_map",
+        key="satellite_risk_map_v3",
     )
 
 
+st.divider()
+
 st.caption(
     "PahadiSathi is a prototype. "
-    "Follow official warnings during emergencies."
+    "Satellite imagery and weather data are for "
+    "demonstration only. Follow official warnings "
+    "during emergencies."
 )
