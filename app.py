@@ -151,19 +151,27 @@ blockages_df = load_road_blockages()
 
 
 # -------------------------
-# City selector
+# City selector (supports 'place_name' or 'location')
 # -------------------------
 if not locations_df.empty:
-    city_list = locations_df["place_name"].tolist()
+    # Support both 'place_name' and 'location' as the name column
+    if "place_name" in locations_df.columns:
+        name_col = "place_name"
+    elif "location" in locations_df.columns:
+        name_col = "location"
+    else:
+        name_col = locations_df.columns[0]  # fallback to first column
+
+    city_list = locations_df[name_col].astype(str).tolist()
     selected_city = st.selectbox(
         "Select city / location",
         options=city_list,
         index=0,
     )
 
-    selected_row = locations_df[locations_df["place_name"] == selected_city].iloc[0]
-    default_lat = float(selected_row["latitude"])
-    default_lon = float(selected_row["longitude"])
+    selected_row = locations_df[locations_df[name_col] == selected_city].iloc[0]
+    default_lat = float(selected_row.get("latitude", 30.35))
+    default_lon = float(selected_row.get("longitude", 79.10))
     default_elev = float(selected_row.get("elevation", 1500))
     default_slope = float(selected_row.get("slope", 25))
     default_soil = str(selected_row.get("soil_type", "Moderate"))
@@ -299,7 +307,14 @@ for _, row in locations_df.iterrows():
     soil = str(row.get("soil_type", "Moderate"))
     history = str(row.get("landslide_history", "No"))
 
-    place = str(row.get("place_name", "Unknown location"))
+    # Support both 'place_name' and 'location'
+    if "place_name" in locations_df.columns:
+        place = str(row.get("place_name", "Unknown location"))
+    elif "location" in locations_df.columns:
+        place = str(row.get("location", "Unknown location"))
+    else:
+        place = str(row.get(locations_df.columns[0], "Unknown location"))
+
     district = str(row.get("district", "N/A"))
 
     level, color, score, reasons = calculate_risk_level(
