@@ -1,29 +1,28 @@
 from pathlib import Path
 from datetime import datetime
-import uuid
 import html
+import uuid
 
+import folium
 import pandas as pd
 import requests
 import streamlit as st
-import folium
 from streamlit_folium import st_folium
 
 
 # =========================================================
-# PAGE CONFIGURATION
+# PAGE SETTINGS
 # =========================================================
 
 st.set_page_config(
     page_title="PahadiSathi",
     page_icon="🏔️",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
 
 
 # =========================================================
-# FILE PATHS
+# PATHS
 # =========================================================
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -36,7 +35,7 @@ BLOCKAGES_FILE = DATA_DIR / "road_blockages.csv"
 
 
 # =========================================================
-# DEFAULT UTTARAKHAND LOCATIONS
+# LOCATION DATA
 # =========================================================
 
 LOCATION_COLUMNS = [
@@ -87,31 +86,36 @@ DEFAULT_LOCATION_DF = pd.DataFrame(
 
 
 # =========================================================
-# DATA CLEANING FUNCTIONS
+# CSV HELPERS
 # =========================================================
 
 def normalize_columns(df):
     df = df.copy()
-
     df.columns = (
         df.columns.astype(str)
         .str.strip()
         .str.lower()
         .str.replace(" ", "_", regex=False)
     )
-
     return df
+
+
+def safe_number(value, default=0.0):
+    try:
+        if pd.isna(value):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def normalize_locations(df):
     df = normalize_columns(df)
 
-    # Old CSV may use location instead of place_name
     if "place_name" not in df.columns and "location" in df.columns:
         df["place_name"] = df["location"]
 
-    # Alternative column names
-    alternate_names = {
+    aliases = {
         "lat": "latitude",
         "lon": "longitude",
         "lng": "longitude",
@@ -121,23 +125,25 @@ def normalize_locations(df):
         "history": "landslide_history",
     }
 
-    for old_name, new_name in alternate_names.items():
+    for old_name, new_name in aliases.items():
         if new_name not in df.columns and old_name in df.columns:
             df[new_name] = df[old_name]
 
-    # Missing columns add karo
     for column in LOCATION_COLUMNS:
         if column not in df.columns:
             df[column] = ""
 
-    # Numeric columns
-    for column in ["latitude", "longitude", "elevation", "slope"]:
+    for column in [
+        "latitude",
+        "longitude",
+        "elevation",
+        "slope",
+    ]:
         df[column] = pd.to_numeric(
             df[column],
             errors="coerce",
         )
 
-    # Text columns
     for column in [
         "place_name",
         "district",
@@ -153,7 +159,6 @@ def normalize_locations(df):
     df["soil_type"] = df["soil_type"].fillna("Moderate")
     df["landslide_history"] = df["landslide_history"].fillna("No")
 
-    # Invalid coordinate rows remove karo
     df = df.dropna(
         subset=["latitude", "longitude"]
     )
@@ -166,53 +171,39 @@ def normalize_locations(df):
     return df[LOCATION_COLUMNS].copy()
 
 
-def merge_locations(csv_df, default_df):
+def merge_locations(csv_df):
     csv_df = normalize_locations(csv_df)
-    default_df = normalize_locations(default_df)
+    defaults = normalize_locations(
+        DEFAULT_LOCATION_DF
+    )
 
-    # CSV rows first, default rows afterward
-    merged = pd.concat(
-        [csv_df, default_df],
+    combined = pd.concat(
+        [csv_df, defaults],
         ignore_index=True,
     )
 
-    merged["_city_key"] = (
-        merged["place_name"]
+    combined["_city_key"] = (
+        combined["place_name"]
         .astype(str)
         .str.strip()
         .str.casefold()
     )
 
-    # Same city duplicate nahi hogi
-    merged = merged.drop_duplicates(
-        subset=["_city_key"],
+    combined = combined.drop_duplicates(
+        subset="_city_key",
         keep="first",
     )
 
-    merged = merged.drop(
-        columns=["_city_key"],
+    combined = combined.drop(
+        columns="_city_key",
         errors="ignore",
     )
 
-    return merged.reset_index(drop=True)
-
-
-def ensure_columns(df, required_columns):
-    df = df.copy()
-
-    for column in required_columns:
-        if column not in df.columns:
-            df[column] = ""
-
-    return df[required_columns]
+    return combined.reset_index(drop=True)
 
 
 @st.cache_data
-def load_locations(file_signature):
-    csv_df = pd.DataFrame(
-        columns=LOCATION_COLUMNS
-    )
-
+def load_locations(file_time):
     if LOCATIONS_FILE.exists():
         try:
             csv_df = pd.read_csv(
@@ -222,13 +213,13 @@ def load_locations(file_signature):
             csv_df = pd.DataFrame(
                 columns=LOCATION_COLUMNS
             )
+    else:
+        csv_df = pd.DataFrame(
+            columns=LOCATION_COLUMNS
+        )
 
-    final_df = merge_locations(
-        csv_df,
-        DEFAULT_LOCATION_DF,
-    )
+    final_df = merge_locations(csv_df)
 
-    # Complete merged city list save karo
     try:
         final_df.to_csv(
             LOCATIONS_FILE,
@@ -240,15 +231,20 @@ def load_locations(file_signature):
     return final_df
 
 
-def load_csv(file_path, required_columns):
-    """
-    Old ya incomplete CSV ko safely load karta hai.
-    Missing columns automatically add hoti hain.
-    """
+def ensure_columns(df, columns):
+    df = df.copy()
 
+    for column in columns:
+        if column not in df.columns:
+            df[column] = ""
+
+    return df[columns]
+
+
+def load_csv(file_path, columns):
     if not file_path.exists():
         empty_df = pd.DataFrame(
-            columns=required_columns
+            columns=columns
         )
         empty_df.to_csv(
             file_path,
@@ -261,18 +257,20 @@ def load_csv(file_path, required_columns):
         df = normalize_columns(df)
     except Exception:
         return pd.DataFrame(
-            columns=required_columns
+            columns=columns
         )
 
-    df = ensure_columns(
+    return ensure_columns(
         df,
-        required_columns,
+        columns,
     )
 
-    return df
 
-
-def save_csv(df, file_path):
+def save_csv(df, file_path, columns):
+    df = ensure_columns(
+        df,
+        columns,
+    )
     df.to_csv(
         file_path,
         index=False,
@@ -282,15 +280,6 @@ def save_csv(df, file_path):
 # =========================================================
 # RISK CALCULATION
 # =========================================================
-
-def safe_number(value, default=0.0):
-    try:
-        if pd.isna(value):
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
 
 def calculate_risk(
     row,
@@ -346,11 +335,11 @@ def calculate_risk(
     else:
         score += 5
 
-    if history in {
+    if history in [
         "yes",
         "true",
         "1",
-    }:
+    ]:
         score += 15
 
     if rainfall >= 100:
@@ -380,7 +369,7 @@ def calculate_risk(
 
 
 # =========================================================
-# WEATHER FUNCTION
+# WEATHER
 # =========================================================
 
 @st.cache_data(ttl=900)
@@ -401,33 +390,28 @@ def get_weather(latitude, longitude):
             url,
             timeout=10,
         )
-
         response.raise_for_status()
-
-        data = response.json()
-
-        return data.get(
+        return response.json().get(
             "current",
             {},
         )
-
     except Exception:
         return {}
 
 
 # =========================================================
-# LOAD ALL DATA
+# LOAD DATA
 # =========================================================
 
 if LOCATIONS_FILE.exists():
-    location_signature = (
+    locations_file_time = (
         LOCATIONS_FILE.stat().st_mtime_ns
     )
 else:
-    location_signature = 0
+    locations_file_time = 0
 
 locations_df = load_locations(
-    location_signature
+    locations_file_time
 )
 
 REPORT_COLUMNS = [
@@ -461,15 +445,16 @@ blockages_df = load_csv(
     BLOCKAGE_COLUMNS,
 )
 
-# Old CSV files ko corrected format mein save karo
-reports_df.to_csv(
+save_csv(
+    reports_df,
     REPORTS_FILE,
-    index=False,
+    REPORT_COLUMNS,
 )
 
-blockages_df.to_csv(
+save_csv(
+    blockages_df,
     BLOCKAGES_FILE,
-    index=False,
+    BLOCKAGE_COLUMNS,
 )
 
 
@@ -523,8 +508,7 @@ if not city_options:
 
 selected_city = st.selectbox(
     "City choose kijiye",
-    options=city_options,
-    index=0,
+    city_options,
     key="city_selector",
 )
 
@@ -551,20 +535,17 @@ selected_lon = safe_number(
     selected_row["longitude"]
 )
 
-selected_weather = get_weather(
+weather = get_weather(
     selected_lat,
     selected_lon,
 )
 
-rainfall_now = safe_number(
-    selected_weather.get(
-        "rain",
-        0,
-    )
+current_rain = safe_number(
+    weather.get("rain", 0)
 )
 
-humidity_now = safe_number(
-    selected_weather.get(
+current_humidity = safe_number(
+    weather.get(
         "relative_humidity_2m",
         50,
     )
@@ -573,14 +554,14 @@ humidity_now = safe_number(
 selected_score, selected_level, _ = (
     calculate_risk(
         selected_row,
-        rainfall=rainfall_now,
-        soil_moisture=humidity_now,
+        rainfall=current_rain,
+        soil_moisture=current_humidity,
     )
 )
 
 
 # =========================================================
-# SELECTED CITY DETAILS
+# CITY DETAILS
 # =========================================================
 
 st.subheader(
@@ -614,7 +595,7 @@ city_col4.metric(
 
 
 # =========================================================
-# LIVE WEATHER
+# WEATHER DISPLAY
 # =========================================================
 
 st.subheader(
@@ -625,25 +606,25 @@ weather_col1, weather_col2, weather_col3, weather_col4 = (
     st.columns(4)
 )
 
-if selected_weather:
+if weather:
     weather_col1.metric(
         "Temperature",
-        f"{selected_weather.get('temperature_2m', 'N/A')} °C",
+        f"{weather.get('temperature_2m', 'N/A')} °C",
     )
 
     weather_col2.metric(
         "Humidity",
-        f"{selected_weather.get('relative_humidity_2m', 'N/A')}%",
+        f"{weather.get('relative_humidity_2m', 'N/A')}%",
     )
 
     weather_col3.metric(
         "Rain",
-        f"{selected_weather.get('rain', 'N/A')} mm",
+        f"{weather.get('rain', 'N/A')} mm",
     )
 
     weather_col4.metric(
         "Wind",
-        f"{selected_weather.get('wind_speed_10m', 'N/A')} km/h",
+        f"{weather.get('wind_speed_10m', 'N/A')} km/h",
     )
 else:
     st.warning(
@@ -652,7 +633,7 @@ else:
 
 
 # =========================================================
-# RISK MAP
+# MAP WITH STREET AND SATELLITE LAYERS
 # =========================================================
 
 st.subheader(
@@ -666,7 +647,31 @@ risk_map = folium.Map(
     ],
     zoom_start=8,
     control_scale=True,
+    tiles=None,
 )
+
+# Street map
+folium.TileLayer(
+    tiles="OpenStreetMap",
+    name="Street Map",
+    overlay=False,
+    control=True,
+    show=True,
+).add_to(risk_map)
+
+# Satellite map
+folium.TileLayer(
+    tiles=(
+        "https://server.arcgisonline.com/"
+        "ArcGIS/rest/services/World_Imagery/"
+        "MapServer/tile/{z}/{y}/{x}"
+    ),
+    attr="Esri",
+    name="Satellite Map",
+    overlay=False,
+    control=True,
+    show=False,
+).add_to(risk_map)
 
 for _, row in locations_df.iterrows():
     latitude = safe_number(
@@ -712,6 +717,11 @@ for _, row in locations_df.iterrows():
         ),
     ).add_to(risk_map)
 
+folium.LayerControl(
+    position="topright",
+    collapsed=False,
+).add_to(risk_map)
+
 st_folium(
     risk_map,
     width=None,
@@ -734,7 +744,7 @@ with calc_col1:
         "Rainfall in last 24 hours (mm)",
         min_value=0.0,
         max_value=1000.0,
-        value=float(rainfall_now),
+        value=float(current_rain),
         step=1.0,
     )
 
@@ -747,7 +757,7 @@ with calc_col2:
             0,
             min(
                 100,
-                int(humidity_now),
+                int(current_humidity),
             ),
         ),
     )
@@ -768,7 +778,7 @@ st.metric(
 
 
 # =========================================================
-# INCIDENT REPORT FORM
+# INCIDENT REPORT
 # =========================================================
 
 st.subheader(
@@ -845,14 +855,10 @@ with st.form(
                 ignore_index=True,
             )
 
-            reports_df = ensure_columns(
-                reports_df,
-                REPORT_COLUMNS,
-            )
-
             save_csv(
                 reports_df,
                 REPORTS_FILE,
+                REPORT_COLUMNS,
             )
 
             st.success(
@@ -861,7 +867,7 @@ with st.form(
 
 
 # =========================================================
-# ROAD BLOCKAGE FORM
+# ROAD BLOCKAGE REPORT
 # =========================================================
 
 st.subheader(
@@ -934,14 +940,10 @@ with st.form(
                 ignore_index=True,
             )
 
-            blockages_df = ensure_columns(
-                blockages_df,
-                BLOCKAGE_COLUMNS,
-            )
-
             save_csv(
                 blockages_df,
                 BLOCKAGES_FILE,
+                BLOCKAGE_COLUMNS,
             )
 
             st.success(
@@ -967,7 +969,7 @@ tab1, tab2, tab3 = st.tabs(
 
 
 # -----------------------------
-# TAB 1: ALL CITIES
+# ALL CITIES
 # -----------------------------
 
 with tab1:
@@ -1004,14 +1006,10 @@ with tab1:
 
 
 # -----------------------------
-# TAB 2: INCIDENT REPORTS
+# INCIDENT REPORTS
 # -----------------------------
 
 with tab2:
-    st.subheader(
-        "Incident Reports"
-    )
-
     if reports_df.empty:
         st.info(
             "Abhi koi incident report nahi hai."
@@ -1022,7 +1020,6 @@ with tab2:
             REPORT_COLUMNS,
         )
 
-        # Safe temporary sorting column
         reports_display["_sort_date"] = (
             pd.to_datetime(
                 reports_display["created_at"],
@@ -1039,7 +1036,7 @@ with tab2:
         )
 
         reports_display = reports_display.drop(
-            columns=["_sort_date"],
+            columns="_sort_date",
             errors="ignore",
         )
 
@@ -1051,14 +1048,10 @@ with tab2:
 
 
 # -----------------------------
-# TAB 3: ROAD BLOCKAGES
+# ROAD BLOCKAGES
 # -----------------------------
 
 with tab3:
-    st.subheader(
-        "Road Blockages"
-    )
-
     if blockages_df.empty:
         st.info(
             "Abhi koi road blockage report nahi hai."
@@ -1069,7 +1062,6 @@ with tab3:
             BLOCKAGE_COLUMNS,
         )
 
-        # Safe temporary sorting column
         blockages_display["_sort_date"] = (
             pd.to_datetime(
                 blockages_display["created_at"],
@@ -1086,7 +1078,7 @@ with tab3:
         )
 
         blockages_display = blockages_display.drop(
-            columns=["_sort_date"],
+            columns="_sort_date",
             errors="ignore",
         )
 
@@ -1095,50 +1087,6 @@ with tab3:
             use_container_width=True,
             hide_index=True,
         )
-
-
-# =========================================================
-# DEBUG SECTION
-# =========================================================
-
-with st.expander(
-    "🔧 Data and Debug Information"
-):
-    st.write(
-        "Locations file:",
-        str(LOCATIONS_FILE),
-    )
-
-    st.write(
-        "Total cities loaded:",
-        len(locations_df),
-    )
-
-    st.write(
-        "Cities in dropdown:",
-        city_options,
-    )
-
-    st.write(
-        "Location columns:",
-        locations_df.columns.tolist(),
-    )
-
-    st.write(
-        "Report columns:",
-        reports_df.columns.tolist(),
-    )
-
-    st.write(
-        "Blockage columns:",
-        blockages_df.columns.tolist(),
-    )
-
-    if st.button(
-        "Clear cache and reload"
-    ):
-        st.cache_data.clear()
-        st.rerun()
 
 
 # =========================================================
