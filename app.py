@@ -94,7 +94,6 @@ def save_report(report_dict):
     df = load_reports()
     new_row = pd.DataFrame([report_dict])
     df = pd.concat([df, new_row], ignore_index=True)
-    # Ensure consistent column order
     expected_cols = [
         "id",
         "report_type",
@@ -152,12 +151,37 @@ blockages_df = load_road_blockages()
 
 
 # -------------------------
+# City selector
+# -------------------------
+if not locations_df.empty:
+    city_list = locations_df["place_name"].tolist()
+    selected_city = st.selectbox(
+        "Select city / location",
+        options=city_list,
+        index=0,
+    )
+
+    selected_row = locations_df[locations_df["place_name"] == selected_city].iloc[0]
+    default_lat = float(selected_row["latitude"])
+    default_lon = float(selected_row["longitude"])
+    default_elev = float(selected_row.get("elevation", 1500))
+    default_slope = float(selected_row.get("slope", 25))
+    default_soil = str(selected_row.get("soil_type", "Moderate"))
+    default_history = str(selected_row.get("landslide_history", "No"))
+else:
+    selected_city = None
+    default_lat = 30.35
+    default_lon = 79.10
+    default_elev = 1500
+    default_slope = 25
+    default_soil = "Moderate"
+    default_history = "No"
+
+
+# -------------------------
 # Live weather section
 # -------------------------
 st.header("🌦️ Live weather")
-
-default_lat = float(locations_df.iloc[0]["latitude"]) if not locations_df.empty else 30.35
-default_lon = float(locations_df.iloc[0]["longitude"]) if not locations_df.empty else 79.10
 
 try:
     weather_data = get_weather(default_lat, default_lon)
@@ -188,8 +212,8 @@ except Exception:
 st.header("🗺️ Landslide risk & incidents map")
 
 map_view = folium.Map(
-    location=[30.35, 79.10],
-    zoom_start=8,
+    location=[default_lat, default_lon],
+    zoom_start=9,
     tiles=None,
 )
 
@@ -298,7 +322,7 @@ for _, row in locations_df.iterrows():
     ).add_to(map_view)
 
 
-# Citizen incident reports (new Report Area)
+# Citizen incident reports (Report Area)
 for _, row in reports_df.iterrows():
     if pd.isna(row.get("latitude")) or pd.isna(row.get("longitude")):
         continue
@@ -334,7 +358,7 @@ for _, row in reports_df.iterrows():
     ).add_to(map_view)
 
 
-# Road blockage markers (existing feature)
+# Road blockage markers
 for _, row in blockages_df.iterrows():
     if pd.isna(row.get("latitude")) or pd.isna(row.get("longitude")):
         continue
@@ -374,7 +398,7 @@ st_folium(map_view, width=900, height=600, key="main_risk_report_map")
 
 
 # -------------------------
-# Report an Incident (NEW)
+# Report an Incident
 # -------------------------
 st.divider()
 st.header("📍 Report an Incident")
@@ -401,9 +425,9 @@ with st.form("incident_report_form", clear_on_submit=True):
 
     col1, col2 = st.columns(2)
     with col1:
-        lat_input = st.number_input("Latitude", value=30.35, format="%.6f")
+        lat_input = st.number_input("Latitude", value=default_lat, format="%.6f")
     with col2:
-        lon_input = st.number_input("Longitude", value=79.10, format="%.6f")
+        lon_input = st.number_input("Longitude", value=default_lon, format="%.6f")
 
     severity = st.selectbox(
         "Severity",
@@ -443,7 +467,7 @@ with st.form("incident_report_form", clear_on_submit=True):
 
 
 # -------------------------
-# Reports Dashboard (NEW)
+# Reports Dashboard
 # -------------------------
 st.divider()
 st.header("📋 Reports Dashboard")
@@ -482,7 +506,7 @@ else:
 
 
 # -------------------------
-# Road blockage reporting (existing)
+# Road blockage reporting
 # -------------------------
 st.divider()
 st.header("🚧 Road blockage reporting")
@@ -523,9 +547,9 @@ with st.form("road_blockage_form", clear_on_submit=True):
 
     col_lat1, col_lon1 = st.columns(2)
     with col_lat1:
-        lat_rb = st.number_input("Latitude", value=30.35, format="%.6f", key="rb_lat")
+        lat_rb = st.number_input("Latitude", value=default_lat, format="%.6f", key="rb_lat")
     with col_lon1:
-        lon_rb = st.number_input("Longitude", value=79.10, format="%.6f", key="rb_lon")
+        lon_rb = st.number_input("Longitude", value=default_lon, format="%.6f", key="rb_lon")
 
     blockage_type = st.selectbox(
         "Blockage type",
@@ -604,7 +628,7 @@ else:
 
 
 # -------------------------
-# Risk calculator (existing)
+# Manual risk calculator
 # -------------------------
 st.divider()
 st.header("🧮 Manual risk calculator")
@@ -627,7 +651,7 @@ with col_r1:
         "Slope (degrees)",
         min_value=0.0,
         max_value=90.0,
-        value=25.0,
+        value=default_slope,
         step=1.0,
     )
 
@@ -635,20 +659,25 @@ with col_r2:
     elev_input = st.number_input(
         "Elevation (m)",
         min_value=0,
-        value=1500,
+        value=int(default_elev),
         step=50,
     )
+
+    soil_options = ["Stable / rocky", "Moderate", "Loose / unconsolidated"]
+    soil_index = 1
+    if default_soil in soil_options:
+        soil_index = soil_options.index(default_soil)
+
     soil_input = st.selectbox(
         "Soil / rock condition",
-        [
-            "Stable / rocky",
-            "Moderate",
-            "Loose / unconsolidated",
-        ],
+        soil_options,
+        index=soil_index,
     )
+
     history_input = st.selectbox(
         "Past landslide history here?",
         ["No", "Yes"],
+        index=1 if default_history == "Yes" else 0,
     )
 
 level_r, color_r, score_r, reasons_r = calculate_risk_level(
